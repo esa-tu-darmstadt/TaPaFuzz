@@ -1,0 +1,5 @@
+# Subfolders will be auto-generated
+/*/bin
+/*/elf
+**.o
+**.a

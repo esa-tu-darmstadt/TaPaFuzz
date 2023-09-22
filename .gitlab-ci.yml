@@ -1,0 +1,206 @@
+image: fedora:36
+
+variables:
+  QUESTASIM_VER: "2021.3"
+  QUESTASIM_DIR: "path/to/questasim"
+  QUESTASIM_LICENSE: "path/to/questa_license"
+  VIVADO_VER: "2021.2"
+  XILINX_VIVADO: "path/to/vivado"
+  XILINXD_LICENSE_FILE: "path/to/xilinx_license"
+  BLUESPEC_HOME: "path/to/bluespec"
+  BLUESPECDIR:   "path/to/bluespec/lib"
+  #Tell GitLab CI to fetch the submodules.
+  GIT_SUBMODULE_STRATEGY: recursive
+
+stages:
+ # Testing the FuzzerCore with BSV Compiler and Simulator
+ # - prepareToolchain
+ - build
+ - setupSimulation
+ - simulate
+
+before_script:
+  #cocotb, questasim (from tapasco-pe-tb's .gitlab-ci.yml)
+  - yum -y install make git python3-pip python3-devel libX11 ncurses-compat-libs glibc.i686 gcc gcc-c++ libXext libXft boost-devel langpacks-en libstdc++-static
+  - ln -s /usr/bin/python3 /usr/bin/python
+  - export LC_ALL=C
+  - pip3 install --user git+https://github.com/cocotb/cocotb#egg=cocotb[bus]
+  - export PATH=/root/.local/bin/:$PATH
+  - sed "s/cocotb_bus.bus import Bus/bus import Bus/" -i $(cocotb-config --prefix)/cocotb_bus/drivers/__init__.py
+  - export PATH="$QUESTASIM_DIR/bin:${PATH}"
+  - export MGLS_LICENSE_FILE=$QUESTASIM_LICENSE
+  
+  - source $XILINX_VIVADO/settings64.sh
+  - export MTI_BYPASS_SC_PLATFORM_CHECK=1
+
+  - export PATH="$BLUESPEC_HOME/bin:$PATH"
+  
+  - yum -y install cargo
+  
+  - cp testbench/*.py testbench/tapasco-pe-tb/
+  - cp testbench/create_sim_verilog.tcl testbench/tapasco-pe-tb/
+
+
+.buildPE_template: &buildPE_def
+  tags:
+    - CAD
+    - Normal
+  stage: build
+  script:
+    # Build the PE
+    - git clone https://github.com/esa-tu-darmstadt/tapasco-riscv.git
+    - echo "Building PE"
+    - export TAPASCO_RV_DIR=`pwd`/tapasco-riscv
+    - make prep_sim_${RISCVCORE}
+  artifacts:
+    paths:
+      - testbench/tapasco-pe-tb/tapasco_pe*.zip
+    expire_in: 1 week
+
+buildPE_cva5:
+  <<: *buildPE_def
+  variables:
+    RISCVCORE: "cva5"
+
+buildHost:
+  tags:
+    - Normal
+  stage: build
+  script:
+    - pushd host/fuzzer_host_libafl
+    - cargo build
+    - popd
+  artifacts:
+    paths:
+      - host/fuzzer_host_libafl/target/debug/fuzzer_host_libafl
+    expire_in: 1 week
+
+buildBinaries:
+  tags:
+    - Normal
+  stage: build
+  script:
+    - yum -y install binutils-riscv64-linux-gnu gcc-c++-riscv64-linux-gnu
+    - export TAPASCO_RV_DIR="TP_not_needed_here."
+    - RISCV_CC=riscv64-linux-gnu-gcc RISCV_OBJCOPY=riscv64-linux-gnu-objcopy VERBOSE=1 make binaries
+  artifacts:
+    paths:
+      - testPrograms/en_*/bin/*.bin
+    expire_in: 1 week
+
+setupQuesta:
+  tags:
+    - CAD
+    - Normal
+  stage: build
+  # No dependencies here
+  script:
+    # Not doing make sim -> need to ensure simlib_questa being available
+    - pushd testbench/tapasco-pe-tb
+    - |
+      if [ "$(cat compile_simlib_questaver.txt || :)." != "${QUESTASIM_VER}." ] \
+         || [ "$(cat compile_simlib_vivadover.txt || :)." != "${VIVADO_VER}." ]; then
+        make simlib_questa
+      fi
+    - echo "$QUESTASIM_VER" > compile_simlib_questaver.txt
+    - echo "$VIVADO_VER" > compile_simlib_vivadover.txt
+    - popd
+  cache: # Artifacts not available, because of simlib's size
+    key: "${CI_COMMIT_REF_SLUG}-Questa"
+    paths:
+      - testbench/tapasco-pe-tb/compile_simlib/ # cache: compile_simlib, results of make vivado_prj and tapasco_pe.zip
+      - testbench/tapasco-pe-tb/.Xil
+      - testbench/tapasco-pe-tb/.cxl*
+      - testbench/tapasco-pe-tb/compile_simlib*
+      - testbench/tapasco-pe-tb/modelsim.ini
+      - testbench/tapasco-pe-tb/questa.tcl
+
+
+.makeVivadoProject_template: &makeVivadoProject_def
+  tags:
+    - CAD
+    - Normal
+  stage: setupSimulation
+  script:
+    - pushd testbench/tapasco-pe-tb
+    - make vivado_prj
+    - mkdir buildcache && mkdir buildcache/${RISCVCORE}
+    - mv sim_build buildcache/${RISCVCORE}
+    - mv user_ip buildcache/${RISCVCORE}
+    - mv simulate_testbench.* buildcache/${RISCVCORE}
+    - popd
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}-Questa"
+    paths:
+      - testbench/tapasco-pe-tb/compile_simlib/ # cache: compile_simlib, results of make vivado_prj and tapasco_pe.zip
+      - testbench/tapasco-pe-tb/.Xil
+      - testbench/tapasco-pe-tb/.cxl*
+      - testbench/tapasco-pe-tb/compile_simlib.log
+      - testbench/tapasco-pe-tb/modelsim.ini
+      - testbench/tapasco-pe-tb/questa.tcl
+    policy: pull
+  artifacts:
+    name: "VivadoProject_${RISCVCORE}"
+    paths:
+      - testbench/tapasco-pe-tb/buildcache/
+    expire_in: 1 hour
+
+makeVivadoProject_cva5:
+  <<: *makeVivadoProject_def
+  dependencies:
+    - buildPE_cva5 # Get the tapasco-pe.zip from buildPE stage
+  variables:
+    RISCVCORE: "cva5"
+
+.simulate_template: &simulate_def
+  tags:
+    - CAD
+    - Normal
+  stage: simulate
+  dependencies:
+    - makeVivadoProject_cva5 # Get results of make vivado_prj
+    - buildBinaries # binaries
+    - buildHost # LibAFL host
+  script:
+    - export TAPASCO_RV_DIR="not used here"
+    - |
+      FAILURE=0
+      # Run the tests in the TESTS variable for all cores.
+      for RISCVCACHEPATH in testbench/tapasco-pe-tb/buildcache/*/; do 
+        RISCVCORE=$(basename ${RISCVCACHEPATH})
+        pushd testbench/tapasco-pe-tb
+        rm -rf sim_build user_ip simulate_testbench.*
+        mv buildcache/${RISCVCORE}/* .
+        # Copy in the replacement files.
+        # cp ignores the ./ directory (as intended), but returns an error code -> ignore cp errors.
+        cp ../* ./ || :
+        popd
+        TESTS=${TESTS} RISCVCORE=${RISCVCORE} ./ci_run_sim.sh || FAILURE=1
+      done
+      #Make sure FAILURE is still set to 0. Using exit or return with $FAILURE might also work instead.
+      echo $FAILURE | grep 0 > /dev/null
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}-Questa"
+    paths:
+      - testbench/tapasco-pe-tb/compile_simlib/ # cache: compile_simlib, results of make vivado_prj and tapasco_pe.zip
+      - testbench/tapasco-pe-tb/.Xil
+      - testbench/tapasco-pe-tb/.cxl*
+      - testbench/tapasco-pe-tb/compile_simlib.log
+      - testbench/tapasco-pe-tb/modelsim.ini
+      - testbench/tapasco-pe-tb/questa.tcl
+    policy: pull
+  artifacts:
+    when: always
+    paths:
+      - host/fuzzer_host_libafl/ci_logs/
+    expire_in: 1 week
+
+simulate_en_mix1:
+  <<: *simulate_def
+  variables:
+    TESTS: en_mix1:nocrash:good.bin:timeout25m
+
+simulate_access_fault:
+  <<: *simulate_def
+  variables:
+    TESTS: en_read_fault:crash:main.bin:timeout7m en_write_fault:crash:main.bin:timeout7m en_unaligned_addr:crash:main.bin:timeout7m

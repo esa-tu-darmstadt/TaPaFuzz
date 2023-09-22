@@ -1,0 +1,25 @@
+[package]
+name = "fuzzer_host_libafl"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["llmp_compression"]
+llmp_compression = ["libafl/llmp_compression"]
+
+[dependencies]
+tapasco = { git = "https://github.com/esa-tu-darmstadt/tapasco", rev = "d7768b3986d1852b08cb70506dff911f600705e6" } #2022.1
+# LibAFL 0.7.1 equivalent to: https://github.com/AFLplusplus/LibAFL tag 0.7.1, commit aebd85f041753cad0c7656524c4ff4428ac04dd9
+# Compared to the default feature set, remove llmp_compression from LibAFL (added back in by llmp_compression feature of this package).
+libafl = { version = "0.7.1", default-features = false, features = ["std", "derive", "rand_trait", "fork"] }
+postcard = { version = "0.7", features = ["alloc"] }
+futures = "0.3" #https://github.com/rust-lang/futures-rs
+clap = { version = "3.1", features = ["default"] }
+async-trait = "0.1.53"
+async-std = { version = "1.11.0", features = ["unstable"] } # Unstable for async Condvar.
+libc = "0.2.126"
+snafu = "0.7.0"
+unsafe-send-sync = "0.1.0"
+serde = { version = "1.0", default-features = false, features = ["alloc","std"] } # as used by LibAFL

@@ -1,0 +1,6 @@
+The testbench files for TaPaFuzz in this directory are MIT licensed. Based on the tapasco-pe-tb testbench by Carsten Heinz.
+
+A proprietary simulator is used for the testbench, since the PE makes use of Xilinx IP that can currently not be exported for Verilator.
+
+The testbench setup scripts are still to be published (as part of the tapasco-pe-tb repo).
+
