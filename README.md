@@ -97,6 +97,7 @@ The contents of this repository are provided under the MIT license (see the file
 
 Exceptions are indicated by separate `LICENSE` files in subdirectories (that apply to the entire subdirectory), separate license files named to match individual files, or comments in individual files. Additionally, files and directories downloaded as a submodule or by build scripts (e.g. by `testPrograms/mn_*/Makefile`) come with separate license terms.
 
-# Literature
-Florian Meisel, David Volz, Christoph Spang, Dat Tran, and Andreas Koch. 2023. **TaPaFuzz - An FPGA-Accelerated Framework for RISC-V IoT Graybox Fuzzing.** In Workshop on Design and Architectures for Signal and Image Processing, DASIP ’23. Springer International Publishing.
+# Citation
+If you want to cite TaPaFuzz, please use the following information:
 
+Florian Meisel, David Volz, Christoph Spang, Dat Tran, and Andreas Koch. 2023. **TaPaFuzz - An FPGA-Accelerated Framework for RISC-V IoT Graybox Fuzzing.** In Workshop on Design and Architectures for Signal and Image Processing, DASIP ’23. Springer International Publishing.
